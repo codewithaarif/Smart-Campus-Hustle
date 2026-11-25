@@ -20,7 +20,7 @@ interface QRScannerModalProps {
 }
 
 export const QRScannerModal: React.FC<QRScannerModalProps> = ({ isOpen, onClose }) => {
-  const { tenant } = useAuth();
+  const { tenant, user } = useAuth();
   const [tokenInput, setTokenInput] = useState('');
   const [scanType, setScanType] = useState<'IDENTITY' | 'VISITOR' | 'EMERGENCY_OVERRIDE'>('IDENTITY');
   const [verifying, setVerifying] = useState(false);
@@ -31,9 +31,9 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({ isOpen, onClose 
   const stopCameraRef = useRef<(() => void) | null>(null);
 
   // Emergency override state
-  const [officerPin, setOfficerPin] = useState('EMERGENCY_OVERRIDE_9911');
-  const [dualWitness, setDualWitness] = useState('user_admin_apex');
-  const [studentUnivId, setStudentUnivId] = useState('MUR2600425');
+  const [officerPin, setOfficerPin] = useState('');
+  const [dualWitness, setDualWitness] = useState('');
+  const [studentUnivId, setStudentUnivId] = useState('');
 
   useEffect(() => {
     if (!isOpen) stopCameraRef.current?.();
@@ -115,7 +115,8 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({ isOpen, onClose 
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Tenant-ID': tenant?.id || 'tenant_apex'
+            'X-Tenant-ID': tenant?.id || 'tenant_apex',
+            Authorization: 'Bearer ' + localStorage.getItem('smart_campus_token')
           },
           body: JSON.stringify({ qrToken: tokenInput.trim() })
         });
@@ -130,7 +131,8 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({ isOpen, onClose 
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Tenant-ID': tenant?.id || 'tenant_apex'
+            'X-Tenant-ID': tenant?.id || 'tenant_apex',
+            Authorization: 'Bearer ' + localStorage.getItem('smart_campus_token')
           },
           body: JSON.stringify({ passQrCode: tokenInput.trim() })
         });
@@ -145,10 +147,10 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({ isOpen, onClose 
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Tenant-ID': tenant?.id || 'tenant_apex'
+            'X-Tenant-ID': tenant?.id || 'tenant_apex',
+            Authorization: 'Bearer ' + localStorage.getItem('smart_campus_token')
           },
           body: JSON.stringify({
-            officerId: 'user_guard_1',
             dualWitnessId: dualWitness,
             officerPin,
             reason: 'Network outage turnstile clearance protocol',
@@ -269,20 +271,13 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({ isOpen, onClose 
                       Fetch My Live Token
                     </button>
                   )}
-                  {scanType === 'VISITOR' && (
-                    <button
-                      onClick={() => setTokenInput('QR_VIS_SUNIL_2026')}
-                      className="text-[11px] text-campus-600 hover:underline font-medium"
-                    >
-                      Fill Sample Visitor Pass
-                    </button>
-                  )}
+
                 </div>
                 <textarea
                   rows={2}
                   value={tokenInput}
                   onChange={(e) => setTokenInput(e.target.value)}
-                  placeholder=                  {scanType === 'IDENTITY' ? 'Paste the dynamic ID token...' : 'e.g. QR_VIS_SUNIL_2026'}
+                  placeholder={scanType === 'IDENTITY' ? 'Paste the dynamic ID token...' : 'Paste an approved visitor pass code'}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-800 font-mono focus:outline-none focus:ring-2 focus:ring-campus-500"
                 />
               </div>
@@ -292,10 +287,10 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({ isOpen, onClose 
             <div className="bg-red-50/60 border border-red-200 rounded-2xl p-4 space-y-3 text-xs">
               <div className="flex items-center gap-2 text-red-900 font-bold">
                 <KeyRound className="w-4 h-4 text-red-600" />
-                Controlled Emergency Outage Override (Module 20)
+                Server-Verified Emergency Override (Module 20)
               </div>
               <p className="text-[11px] text-red-700">
-                In strict accordance with security guidelines: offline cached passes are never treated as valid entry credentials. During total network outages, passage requires dual-officer credentials.
+                Offline cached passes are never proof of entry. This override records an authorized decision in the campus server and therefore requires server connectivity; physical gate control is not integrated.
               </p>
               <div>
                 <label className="font-medium text-slate-700 block mb-1">Student University ID</label>
@@ -345,7 +340,7 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({ isOpen, onClose 
                 <span>Verifying Cryptographic Credentials...</span>
               </>
             ) : (
-              <span>Verify Gate Credential</span>
+              <span>Verify Server Credential</span>
             )}
           </button>
 

@@ -161,7 +161,7 @@ export const SafetyEmergency: React.FC<SafetyEmergencyProps> = ({ onOpenSOSModal
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800"
                 >
                   <option value="MEDICAL">Medical Injury / Illness</option>
-                  <option value="SECURITY">Unauthorized Entry / Trespassing</option>
+                  <option value="TRESPASSING">Unauthorized Entry / Trespassing</option>
                   <option value="THEFT">Campus Property Theft</option>
                   <option value="CYBER">Cyber Security Threat</option>
                 </select>

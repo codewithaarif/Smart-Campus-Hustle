@@ -18,7 +18,7 @@ export const VisitorManagement: React.FC = () => {
   const [idType, setIdType] = useState('AADHAAR');
   const [idNumber, setIdNumber] = useState('');
   const [purpose, setPurpose] = useState('');
-  const [expectedArrival, setExpectedArrival] = useState('2026-11-04 10:00:00');
+  const [expectedArrival, setExpectedArrival] = useState(() => new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 16));
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -69,9 +69,9 @@ export const VisitorManagement: React.FC = () => {
       if (res.ok) {
         const data = await res.json();
         addNotification(
-          'Visitor Pass Generated',
-          `Pass #${data.passQrCode} issued for ${visitorName}. Host approval verified.`,
-          'SUCCESS'
+          'Visitor Request Submitted',
+          `The visit request for ${visitorName} is waiting for host approval. A QR pass will be issued only after approval.`,
+          'INFO'
         );
         setShowRegModal(false);
         setVisitorName('');
@@ -80,6 +80,32 @@ export const VisitorManagement: React.FC = () => {
       }
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleReviewVisitor = async (visitorId: string, decision: 'APPROVED' | 'REJECTED') => {
+    try {
+      const response = await fetch('/api/visitors/approval', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Tenant-ID': tenant?.id || 'tenant_apex',
+          Authorization: 'Bearer ' + localStorage.getItem('smart_campus_token')
+        },
+        body: JSON.stringify({ visitorId, decision })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || data.error || 'Unable to review visitor request.');
+      addNotification(
+        decision === 'APPROVED' ? 'Visitor Approved' : 'Visitor Rejected',
+        decision === 'APPROVED'
+          ? 'A unique visitor pass was issued. Share it with the visitor securely.'
+          : 'The visitor request was rejected.',
+        decision === 'APPROVED' ? 'SUCCESS' : 'WARNING'
+      );
+      await fetchVisitors();
+    } catch (error) {
+      addNotification('Visitor Review Failed', error instanceof Error ? error.message : 'Please retry.', 'WARNING');
     }
   };
 
@@ -92,7 +118,7 @@ export const VisitorManagement: React.FC = () => {
             Visitor Gate Management
           </h2>
           <p className="text-xs text-slate-500">
-            Module 3: Pre-registration, host signoff, dynamic QR passes, zone permissions & turnstile logs
+            Module 3: Pre-registration, host approval, unique visitor passes, and authenticated gate check-in/out
           </p>
         </div>
 
@@ -140,9 +166,28 @@ export const VisitorManagement: React.FC = () => {
                 </div>
               </div>
 
+              {v.host_approval_status === 'PENDING' &&
+                (v.host_user_id === user?.id || ['UNIVERSITY_ADMIN', 'CAMPUS_ADMIN'].includes(user?.role || '')) && (
+                <div className="mt-3 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleReviewVisitor(v.id, 'APPROVED')}
+                    className="flex-1 rounded-lg bg-emerald-600 px-3 py-2 text-white font-bold text-[11px]"
+                  >
+                    Approve & issue pass
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleReviewVisitor(v.id, 'REJECTED')}
+                    className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-red-700 font-bold text-[11px]"
+                  >
+                    Reject
+                  </button>
+                </div>
+              )}
               <div className="mt-4 pt-3 border-t border-slate-200/60 flex items-center justify-between text-[11px]">
                 <span className="font-mono font-bold text-slate-700 flex items-center gap-1">
-                  <QrCode className="w-3.5 h-3.5 text-campus-600" /> {v.pass_qr_code}
+                  <QrCode className="w-3.5 h-3.5 text-campus-600" /> {v.pass_qr_code || 'Pass issued after host approval'}
                 </span>
                 <span className="text-[10px] text-slate-400">
                   {v.check_in_time ? `In: ${new Date(v.check_in_time).toLocaleTimeString()}` : 'Not Checked In'}
@@ -158,7 +203,7 @@ export const VisitorManagement: React.FC = () => {
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-6 max-w-lg w-full space-y-4 animate-in zoom-in-95">
             <h3 className="font-extrabold text-base text-slate-900">Pre-Register Campus Visitor</h3>
-            <p className="text-xs text-slate-500">Generates instant digital QR pass with host clearance</p>
+            <p className="text-xs text-slate-500">The host must approve the request before a visitor pass is issued.</p>
 
             <form onSubmit={handleRegisterVisitor} className="space-y-3 text-xs">
               <div>

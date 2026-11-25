@@ -15,6 +15,7 @@ export const FinancePortal: React.FC = () => {
   const [dues, setDues] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [scholarships, setScholarships] = useState<any[]>([]);
+  const [paymentConfig, setPaymentConfig] = useState<any>({ mode: 'UNCONFIGURED', ready: false, description: 'Checking server configuration' });
   const [loading, setLoading] = useState(true);
 
   // Active Razorpay payment modal
@@ -22,8 +23,8 @@ export const FinancePortal: React.FC = () => {
 
   // Scholarship Application state
   const [selectedScholarship, setSelectedScholarship] = useState<any | null>(null);
-  const [gpa, setGpa] = useState('9.4');
-  const [annualIncome, setAnnualIncome] = useState('450000');
+  const [gpa, setGpa] = useState('');
+  const [annualIncome, setAnnualIncome] = useState('');
   const [sop, setSop] = useState('');
   const [applying, setApplying] = useState(false);
 
@@ -45,6 +46,7 @@ export const FinancePortal: React.FC = () => {
         setDues(data.dues || []);
         setTransactions(data.transactions || []);
         setScholarships(data.scholarships || []);
+        setPaymentConfig(data.paymentConfig || { mode: 'UNCONFIGURED', ready: false, description: 'Payment configuration unavailable' });
       }
     } finally {
       setLoading(false);
@@ -54,6 +56,10 @@ export const FinancePortal: React.FC = () => {
   const handleApplyScholarship = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedScholarship) return;
+    if (!Number.isFinite(Number(gpa)) || !Number.isFinite(Number(annualIncome)) || !sop.trim()) {
+      addNotification('Application Incomplete', 'Enter your actual GPA, annual family income, and statement of purpose.', 'WARNING');
+      return;
+    }
     setApplying(true);
     try {
       const res = await fetch('/api/finance/scholarships/apply', {
@@ -75,6 +81,9 @@ export const FinancePortal: React.FC = () => {
         addNotification('Scholarship Application Submitted', `Applied for ${selectedScholarship.title}. Review committee alerted.`, 'SUCCESS');
         setSelectedScholarship(null);
         fetchFinanceData();
+      } else {
+        const errorData = await res.json().catch(() => ({}));
+        addNotification('Scholarship Application Failed', errorData.message || errorData.error || 'Please review your information and try again.', 'WARNING');
       }
     } finally {
       setApplying(false);
@@ -93,13 +102,13 @@ export const FinancePortal: React.FC = () => {
             Financial Management & Razorpay Gateway
           </h2>
           <p className="text-xs text-slate-500">
-            Module 6: Semester, hostel & transport dues, Razorpay test mode, digital receipts, scholarships & audit ledger
+            Module 6: Fee ledger, server-verified checkout, receipts, and scholarship applications
           </p>
         </div>
 
         <div className="flex items-center gap-2 text-xs">
-          <span className="px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-800 font-bold border border-emerald-200 flex items-center gap-1.5">
-            <ShieldCheck className="w-4 h-4 text-emerald-600" /> PCI-DSS Compliant (No Raw Cards Stored)
+          <span className={`px-3 py-1.5 rounded-xl font-bold border flex items-center gap-1.5 ${paymentConfig.ready ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-amber-50 text-amber-800 border-amber-200'}`}>
+            <ShieldCheck className="w-4 h-4 text-emerald-600" /> Gateway configuration is reported by the server
           </span>
         </div>
       </div>
@@ -123,9 +132,9 @@ export const FinancePortal: React.FC = () => {
         <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
           <span className="text-xs font-semibold text-slate-500">Gateway Status</span>
           <div className="text-base font-extrabold text-blue-700 mt-2 flex items-center gap-1.5">
-            <Lock className="w-4 h-4" /> Razorpay Test Engine Active
+            <Lock className="w-4 h-4" /> {paymentConfig.mode === 'LOCAL_MOCK' ? 'Local mock payment' : paymentConfig.mode === 'RAZORPAY' ? 'Razorpay checkout' : 'Gateway unavailable'}
           </div>
-          <span className="text-[11px] text-slate-400">Key: rzp_test_smartcampus_2026</span>
+          <span className="text-[11px] text-slate-400">{paymentConfig.description}</span>
         </div>
       </div>
 
@@ -162,9 +171,11 @@ export const FinancePortal: React.FC = () => {
                 {d.balance_amount > 0 ? (
                   <button
                     onClick={() => setActiveDuePayment(d)}
-                    className="px-4 py-2.5 rounded-xl bg-campus-600 hover:bg-campus-700 text-white font-bold text-xs shadow-md shadow-campus-600/20"
+                    disabled={!paymentConfig.ready}
+                    title={!paymentConfig.ready ? paymentConfig.description : 'Open the configured payment checkout'}
+                    className="px-4 py-2.5 rounded-xl bg-campus-600 hover:bg-campus-700 text-white font-bold text-xs shadow-md shadow-campus-600/20 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Pay via Razorpay
+                    Continue to secure checkout
                   </button>
                 ) : (
                   <span className="px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 font-bold text-xs flex items-center gap-1">
@@ -258,7 +269,7 @@ export const FinancePortal: React.FC = () => {
         </div>
       </div>
 
-      {/* Razorpay Test Modal */}
+      {/* Server-verified gateway checkout */}
       <RazorpayModal
         isOpen={!!activeDuePayment}
         onClose={() => setActiveDuePayment(null)}

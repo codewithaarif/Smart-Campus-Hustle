@@ -55,13 +55,13 @@ export const SecurityGovernance: React.FC = () => {
             Security Architecture & Data Governance
           </h2>
           <p className="text-xs text-slate-500">
-            Module 22: Fine-grained RBAC permissions, immutable audit logs, sensitive data access tracking & GDPR/DPDP consent compliance
+            Module 22: Server-enforced access controls and audit records. This screen does not certify legal or regulatory compliance.
           </p>
         </div>
 
         <div className="flex items-center gap-2 text-xs">
           <span className="px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-800 font-bold border border-emerald-200 flex items-center gap-1.5">
-            <Lock className="w-4 h-4 text-emerald-600" /> AES-256 / SHA-256 Encryption Active
+            <Lock className="w-4 h-4 text-emerald-600" /> Server-side authorization enabled
           </span>
         </div>
       </div>
@@ -72,30 +72,30 @@ export const SecurityGovernance: React.FC = () => {
           <span className="font-semibold text-slate-500">Tenant Boundary</span>
           <div className="text-base font-black text-slate-900 mt-1">{getInstitutionName(tenant?.id, tenant?.name)}</div>
           <span className="text-[11px] text-emerald-600 font-bold flex items-center gap-1 mt-0.5">
-            <CheckCircle2 className="w-3.5 h-3.5" /> 100% Isolated Partition
+            <CheckCircle2 className="w-3.5 h-3.5" /> Tenant-scoped API access
           </span>
         </div>
 
         <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
           <span className="font-semibold text-slate-500">Multi-Factor Auth (MFA)</span>
-          <div className="text-base font-black text-slate-900 mt-1">TOTP 2FA Enforced</div>
-          <span className="text-[11px] text-slate-400">Mandatory for Staff & Admin</span>
+          <div className="text-base font-black text-slate-900 mt-1">TOTP when configured</div>
+          <span className="text-[11px] text-slate-400">Requires a registered authenticator secret</span>
         </div>
 
         <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
           <span className="font-semibold text-slate-500">API Rate Limiting</span>
-          <div className="text-base font-black text-slate-900 mt-1">300 req/min</div>
-          <span className="text-[11px] text-slate-400">Sliding Window DDoS Shield</span>
+          <div className="text-base font-black text-slate-900 mt-1">180 req/min</div>
+          <span className="text-[11px] text-slate-400">In-memory per-process request limiter</span>
         </div>
 
         <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
           <span className="font-semibold text-slate-500">Data Retention Rule</span>
-          <div className="text-base font-black text-slate-900 mt-1">7 Years Compliance</div>
-          <span className="text-[11px] text-slate-400">Auto-Archive & Purge Engine</span>
+          <div className="text-base font-black text-slate-900 mt-1">No automatic purge</div>
+          <span className="text-[11px] text-slate-400">Set and enforce retention policy separately</span>
         </div>
       </div>
 
-      {/* Sensitive Data Access Logs (DPDP Compliance) */}
+      {/* Sensitive Data Access Logs */}
       <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm space-y-4">
         <div className="flex items-center justify-between pb-3 border-b border-slate-100">
           <div>
@@ -104,11 +104,11 @@ export const SecurityGovernance: React.FC = () => {
               Sensitive Data Access Audit Logs (Module 22)
             </h3>
             <p className="text-xs text-slate-400">
-              Mandatory access justifications recorded whenever confidential counselling, medical or financial records are viewed
+              Sensitive-data access records are written by supported routes; not every module is connected to this ledger.
             </p>
           </div>
           <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-700">
-            Immutable Audit Trail
+            Operational Audit Log
           </span>
         </div>
 

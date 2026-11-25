@@ -1,9 +1,18 @@
 import test from 'node:test';
+import crypto from 'node:crypto';
 import assert from 'node:assert';
 import db from '../server/db/connection.js';
+import { seedDatabase } from '../server/db/seed.js';
+import { hashPassword, verifyPassword, verifyTotp } from '../server/security/passwords.js';
+import { authMiddleware, generateToken } from '../server/middleware/auth.js';
+import { tenantMiddleware } from '../server/middleware/tenant.js';
+import { handleAuthRoutes } from '../server/routes/authRoutes.js';
+
 import { logSensitiveAccess } from '../server/middleware/audit.js';
 import { AIAssistantService } from '../server/services/aiService.js';
 import { DynamicQRService } from '../server/services/qrService.js';
+
+seedDatabase();
 
 test('Security Module 19 & 22: Strict Tenant Isolation Enforced', () => {
   // Apex University tenant
@@ -73,5 +82,114 @@ test('Emergency override rejects invalid dual-witness credentials', () => {
   });
 
   assert.strictEqual(invalidWitness.success, false);
-  assert.ok(invalidWitness.message.includes('authorized staff credentials'));
+  assert.ok(invalidWitness.message.includes('configured') || invalidWitness.message.includes('invalid'));
+});
+
+test('Passwords use salted scrypt and legacy SHA-256 hashes are upgraded', () => {
+  const first = hashPassword('a-strong-test-password');
+  const second = hashPassword('a-strong-test-password');
+  assert.notStrictEqual(first, second, 'Each password hash must use a fresh salt');
+  assert.strictEqual(verifyPassword('a-strong-test-password', first).valid, true);
+  assert.strictEqual(verifyPassword('wrong-password', first).valid, false);
+  const legacy = crypto.createHash('sha256')
+    .update('legacy-test-password').digest('hex');
+  const checked = verifyPassword('legacy-test-password', legacy);
+  assert.strictEqual(checked.valid, true);
+  assert.strictEqual(checked.needsRehash, true);
+});
+
+test('TOTP validation accepts the current six-digit RFC 6238 code', () => {
+  const secret = 'JBSWY3DPEHPK3PXP';
+  const now = 1_700_000_000_000;
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let bits = '';
+  for (const char of secret) bits += alphabet.indexOf(char).toString(2).padStart(5, '0');
+  const key = Buffer.from(bits.match(/.{8}/g).map((byte) => parseInt(byte, 2)));
+  const counter = Math.floor(now / 30_000);
+  const message = Buffer.alloc(8); message.writeBigUInt64BE(BigInt(counter));
+  const digest = crypto.createHmac('sha1', key).update(message).digest();
+  const offset = digest[digest.length - 1] & 15;
+  const value = (digest.readUInt32BE(offset) & 0x7fffffff) % 1_000_000;
+  const code = String(value).padStart(6, '0');
+  assert.strictEqual(verifyTotp(secret, code, now), true);
+  assert.strictEqual(verifyTotp(secret, '000000', now), false);
+});
+
+test('Authenticated session is required and tenant header cannot cross tenant boundary', () => {
+  const token = generateToken(db.prepare('SELECT * FROM users WHERE id = ?').get('user_student_1'));
+  const req = { headers: { authorization: 'Bearer ' + token }, url: '/api/auth/me', socket: { remoteAddress: '127.0.0.1' } };
+  let status = 0, body = '';
+  const res = { writeHead: (value) => { status = value; }, end: (value) => { body = value; } };
+  authMiddleware(req, res, () => {});
+  assert.strictEqual(status, 401);
+  assert.ok(JSON.parse(body).error === 'SESSION_REVOKED');
+
+  const tenantReq = {
+    headers: { 'x-tenant-id': 'tenant_metro' },
+    url: '/api/finance/dues',
+    user: { id: 'user_student_1', tenant_id: 'tenant_apex', role: 'STUDENT' }
+  };
+  tenantMiddleware(tenantReq, res, () => { throw new Error('Tenant mismatch should not call next.'); });
+  assert.strictEqual(status, 403);
+  assert.strictEqual(JSON.parse(body).error, 'TENANT_MISMATCH');
+});
+
+test('Login creates a revocable session and logout invalidates the same bearer token', () => {
+  const loginReq = {
+    method: 'POST',
+    url: '/api/auth/login',
+    headers: { 'user-agent': 'test-suite' },
+    socket: { remoteAddress: '127.0.0.1' },
+    tenant: { id: 'tenant_apex' }
+  };
+  let loginStatus = 0;
+  let loginBody = '';
+  const loginRes = {
+    writeHead(status) { loginStatus = status; },
+    end(body) { loginBody = body; }
+  };
+  assert.strictEqual(handleAuthRoutes(loginReq, loginRes, '/api/auth/login', {
+    email: 'aarav.patel@student.apex.edu.in',
+    password: 'password123',
+    tenantId: 'tenant_apex'
+  }), true);
+  assert.strictEqual(loginStatus, 200);
+  const { token } = JSON.parse(loginBody);
+  assert.ok(token);
+
+  const authReq = {
+    headers: { authorization: 'Bearer ' + token },
+    url: '/api/auth/me',
+    socket: { remoteAddress: '127.0.0.1' }
+  };
+  let authStatus = 0;
+  const authRes = {
+    writeHead(status) { authStatus = status; },
+    end() {}
+  };
+  let nextCalled = false;
+  authMiddleware(authReq, authRes, () => { nextCalled = true; });
+  assert.strictEqual(nextCalled, true);
+  assert.strictEqual(authReq.user.id, 'user_student_1');
+  assert.ok(authReq.sessionId);
+
+  const logoutReq = {
+    method: 'POST',
+    url: '/api/auth/logout',
+    headers: {},
+    socket: { remoteAddress: '127.0.0.1' },
+    user: authReq.user,
+    sessionId: authReq.sessionId
+  };
+  let logoutStatus = 0;
+  const logoutRes = {
+    writeHead(status) { logoutStatus = status; },
+    end() {}
+  };
+  handleAuthRoutes(logoutReq, logoutRes, '/api/auth/logout', {});
+  assert.strictEqual(logoutStatus, 200);
+
+  authStatus = 0;
+  authMiddleware({ ...authReq, user: undefined }, authRes, () => { nextCalled = false; });
+  assert.strictEqual(authStatus, 401);
 });

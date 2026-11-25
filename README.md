@@ -16,34 +16,56 @@ The following were proposed in the lab workbook but are **not** implemented here
 
 ## Run locally
 
-This project is a Vite + React app and will not work when opened directly as a file (`file:///.../index.html`).
-
-Start the front-end and API correctly:
+Use Node.js 22.9 or newer (the backend uses the built-in `node:sqlite` module). The app must be served through Vite and the API; opening `index.html` as a local file is not supported.
 
 ```bash
 npm install
-npm run dev -- --host 0.0.0.0
+cp .env.example .env
 ```
 
-Then open:
+Open two terminals in the repository:
 
-- Front end: http://localhost:3000/
-- API server: http://localhost:5050/
-
-If you also need the backend mock API server:
+Terminal 1 — API server:
 
 ```bash
 npm run server
+```
+
+Terminal 2 — frontend:
+
+```bash
+npm run dev -- --host 0.0.0.0
+```
+
+Open http://localhost:3000/. The Vite development server proxies `/api` requests to http://localhost:5050.
+
+A new development database is created at `server/data/smart_campus.db` unless `DATABASE_PATH` is set. Development seeding creates sample accounts with the password `password123`; these accounts are for local testing only. Production never seeds sample accounts by default.
+
+## Configuration and production readiness
+
+- Copy `.env.example` and set independent `JWT_SECRET`, `QR_SECRET`, and `EMERGENCY_OVERRIDE_PIN` values before production startup. Production startup fails when signing secrets are missing or too short.
+- `PAYMENTS_MODE=mock` is for local development only. Production requires `PAYMENTS_MODE=razorpay`, `RAZORPAY_KEY_ID`, and `RAZORPAY_KEY_SECRET`. The server derives fee amounts from the ledger and verifies gateway signatures and captured payment details.
+- Set `CORS_ALLOWED_ORIGINS` to the exact frontend origin(s) when the API is hosted separately. Set `TRUST_PROXY=true` only behind a proxy that you control.
+- SQLite files, WAL sidecars, build output, dependencies, and environment files are excluded from Git. Back up the runtime database separately.
+- The service worker caches the public app shell only. It never caches authenticated API responses. Offline synchronization currently supports maintenance drafts; other queued action types are retained and reported as unsupported.
+- QR verification is short-lived and single-use. It does not connect to or actuate a physical gate controller. GPS updates are simulated only when explicitly enabled; real vehicle telemetry needs a device integration.
+
+## Quality checks
+
+```bash
+npm run typecheck
+npm test
+npm run build
 ```
 
 ---
 
 ## 🏛️ Multi-Tenant Architecture & Database Model
 
-- **Multi-Tenant SaaS Boundary**: Every relational table is partitioned by `tenant_id` foreign keys with database-level cascading.
-- **Tenant Middleware**: Enforces `X-Tenant-ID` header or request host filtering. Unmatched tenant queries return `403 Forbidden`.
+- **Tenant boundary**: Authenticated users are bound to their tenant; changing `X-Tenant-ID` or the tenant query parameter cannot switch a normal user into another institution. Tenant scoping is enforced in route queries, with additional composite tenant foreign keys still recommended.
+- **Tenant Middleware**: Resolves the selected tenant and rejects cross-tenant requests for non-platform users. Exact tenant selection must accompany login.
 - **Database Engine**: Relational SQLite ACID engine (`node:sqlite`) with WAL mode, foreign keys, and tenant-scoped indexes.
-- **Security & RBAC**: Fine-grained access control across 13 roles, including student-welfare WARDEN and COUNSELLOR accounts.
+- **Security**: Salted scrypt password hashes (legacy hashes upgrade at login), signed and revocable sessions, TOTP verification for accounts with configured secrets, role checks on sensitive operations, audit events, and short-lived single-use HMAC QR credentials. A full role-permission matrix remains a deployment task.
 
 ## 🏛️ Mewar University Directory
 

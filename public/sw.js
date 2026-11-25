@@ -1,95 +1,70 @@
-const CACHE_NAME = 'smart-campus-v2-cache';
-const OFFLINE_URLS = [
-  '/',
-  '/index.html',
-  '/manifest.json'
-];
+const CACHE_NAME = 'smart-campus-v3-public-shell';
+const OFFLINE_URLS = ['/', '/index.html', '/manifest.json'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(OFFLINE_URLS);
-    })
+    caches.open(CACHE_NAME)
+      .then((cache) => cache.addAll(OFFLINE_URLS))
+      .then(() => self.skipWaiting())
   );
-  self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => {
-      return Promise.all(
-        keys.map((key) => {
-          if (key !== CACHE_NAME) {
-            return caches.delete(key);
-          }
-        })
-      );
-    })
+    caches.keys().then((keys) => Promise.all(
+      keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
+    )).then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
 self.addEventListener('fetch', (event) => {
-  // Only handle GET requests
-  if (event.request.method !== 'GET') return;
+  const request = event.request;
+  if (request.method !== 'GET') return;
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return;
 
-  const url = new URL(event.request.url);
-
-  // Security critical check: never serve gate pass validation purely from stale offline cache without status tag
-  if (url.pathname.includes('/api/identity/gate-pass')) {
+  // Authenticated, tenant-specific API responses are never cached.
+  if (url.pathname.startsWith('/api/')) {
     event.respondWith(
-      fetch(event.request).catch(() => {
-        return new Response(JSON.stringify({
-          error: "OFFLINE_ACCESS_RESTRICTED",
-          verified: false,
-          message: "Gate security requires live cryptographic verification against server. Present your physical ID or request security officer dual-override.",
-          timestamp: new Date().toISOString()
-        }), {
-          status: 503,
-          headers: { 'Content-Type': 'application/json' }
-        });
-      })
+      fetch(request).catch(() => new Response(JSON.stringify({
+        error: 'OFFLINE',
+        message: 'This information is unavailable while offline.'
+      }), {
+        status: 503,
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store'
+        }
+      }))
     );
     return;
   }
 
-  // Network-first for other API calls, cache-first for static assets
-  if (url.pathname.startsWith('/api/')) {
-    event.respondWith(
-      fetch(event.request)
-        .then((response) => {
+  event.respondWith(
+    caches.match(request).then((cached) => {
+      if (cached) return cached;
+      return fetch(request).then((response) => {
+        if (response.ok && response.type === 'basic') {
           const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, clone);
-          });
-          return response;
-        })
-        .catch(() => caches.match(event.request))
-    );
-  } else {
-    event.respondWith(
-      caches.match(event.request).then((cachedResponse) => {
-        return cachedResponse || fetch(event.request).then((networkResponse) => {
-          const clone = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, clone);
-          });
-          return networkResponse;
-        });
-      })
-    );
-  }
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+        }
+        return response;
+      });
+    }).catch(() => caches.match('/index.html'))
+  );
 });
 
-// Push notification listener
 self.addEventListener('push', (event) => {
-  const data = event.data ? event.data.json() : { title: 'Campus Notification', body: 'New alert received' };
+  let data = { title: 'Campus Notification', body: 'New alert received' };
+  try {
+    if (event.data) data = event.data.json();
+  } catch {}
   event.waitUntil(
-    self.registration.showNotification(data.title, {
-      body: data.body,
+    self.registration.showNotification(data.title || 'Campus Notification', {
+      body: data.body || 'New alert received',
       icon: '/icon-192.png',
       badge: '/icon-192.png',
-      data: data
+      data
     })
   );
 });

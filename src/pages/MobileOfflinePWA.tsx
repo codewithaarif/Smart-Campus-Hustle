@@ -9,19 +9,24 @@ import {
 
 export const MobileOfflinePWA: React.FC = () => {
   const { tenant, user } = useAuth();
-  const { isOnline, syncQueue, queueAction } = useOffline();
+  const { isOnline, syncing, syncQueue, queueAction, syncPendingQueue } = useOffline();
   const { addNotification } = useNotifications();
 
   const [emergencyResult, setEmergencyResult] = useState<any | null>(null);
-  const [officerPin, setOfficerPin] = useState('EMERGENCY_OVERRIDE_9911');
-  const [dualWitness, setDualWitness] = useState('user_admin_apex');
+  const [officerPin, setOfficerPin] = useState('');
+  const [dualWitness, setDualWitness] = useState('');
+  const [studentUniversityId, setStudentUniversityId] = useState('');
 
   const handleTestQueueOfflineItem = () => {
     queueAction('OFFLINE_DRAFT_MAINTENANCE', {
       title: 'Water dispenser empty in Library 2nd floor',
+      description: 'Water dispenser is empty and requires a refill or maintenance inspection.',
+      category: 'OTHER',
+      location: 'Library, second floor',
       timestamp: new Date().toISOString()
     });
-    addNotification('Item Queued Offline', 'Saved to IndexedDB / local sync queue. Auto-syncs when online.', 'INFO');
+    addNotification('Maintenance Draft Queued', 'The draft is stored locally and will be sent when the device is online.', 'INFO');
+    if (isOnline) void syncPendingQueue();
   };
 
   const handleSimulateOutageOverride = async () => {
@@ -30,21 +35,21 @@ export const MobileOfflinePWA: React.FC = () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Tenant-ID': tenant?.id || 'tenant_apex'
+          'X-Tenant-ID': tenant?.id || 'tenant_apex',
+          Authorization: 'Bearer ' + localStorage.getItem('smart_campus_token')
         },
         body: JSON.stringify({
-          officerId: 'user_guard_1',
           dualWitnessId: dualWitness,
           officerPin,
           reason: 'Severe network lightning strike emergency protocol',
-          studentUniversityId: user?.university_id || 'MUR2600425'
+          studentUniversityId
         })
       });
 
       const data = await res.json();
       setEmergencyResult(data);
       if (data.success) {
-        addNotification('Emergency Gate Passage Authorized', data.message, 'SUCCESS');
+        addNotification('Emergency Override Recorded', data.message + ' No physical gate hardware is connected to this portal.', 'SUCCESS');
       }
     } catch (err: any) {
       alert('Override call failed: ' + err.message);
@@ -60,7 +65,7 @@ export const MobileOfflinePWA: React.FC = () => {
             Mobile PWA & Offline Gate Pass Protocol
           </h2>
           <p className="text-xs text-slate-500">
-            Module 20: Progressive Web App, offline caching, background synchronization queue & zero-trust turnstile security
+            Module 20: Offline app shell, retained drafts, authenticated synchronization, and live-only gate credential checks
           </p>
         </div>
 
@@ -69,7 +74,7 @@ export const MobileOfflinePWA: React.FC = () => {
             isOnline ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-amber-50 text-amber-800 border-amber-200'
           }`}>
             {isOnline ? <Wifi className="w-4 h-4 text-emerald-600" /> : <WifiOff className="w-4 h-4 text-amber-600" />}
-            {isOnline ? 'Network Connected (Live Verification)' : 'Offline Mode (Local Cache Active)'}
+            {isOnline ? 'Network Connected (Live Verification)' : 'Offline (public app shell only)'}
           </span>
         </div>
       </div>
@@ -92,47 +97,54 @@ export const MobileOfflinePWA: React.FC = () => {
         {/* Left: Offline Caching & Queue */}
         <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm space-y-4">
           <h3 className="font-bold text-slate-900 text-sm">Offline Cache & Background Sync Queue</h3>
-          <p className="text-xs text-slate-500">Information available without active cell or Wi-Fi coverage</p>
+          <p className="text-xs text-slate-500">The application shell is cached; authenticated campus records remain online-only</p>
 
           <div className="space-y-3 text-xs">
             <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between">
               <div>
-                <div className="font-bold text-slate-900">Weekly Lecture Timetable</div>
-                <div className="text-[11px] text-slate-500">Cached locally in CacheStorage & ServiceWorker</div>
+                <div className="font-bold text-slate-900">Application Shell</div>
+                <div className="text-[11px] text-slate-500">App interface and public static assets</div>
               </div>
               <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[10px]">
-                Available Offline
+                App Shell
               </span>
             </div>
 
             <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between">
               <div>
                 <div className="font-bold text-slate-900">Visual Digital Student ID</div>
-                <div className="text-[11px] text-slate-500">Cached for visual verification only (Static QR blocked)</div>
+                <div className="text-[11px] text-slate-500">ID details and gate verification require a live server connection</div>
               </div>
               <span className="px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 font-bold text-[10px]">
-                Visual View Only
+                Online Only
               </span>
             </div>
 
             <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between">
               <div>
-                <div className="font-bold text-slate-900">Emergency Numbers Directory</div>
-                <div className="text-[11px] text-slate-500">Local dialer links available instantly</div>
+                <div className="font-bold text-slate-900">Private Campus Records</div>
+                <div className="text-[11px] text-slate-500">Retrieved from the server after sign-in; not cached offline</div>
               </div>
               <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[10px]">
-                Always Ready
+                Online Only
               </span>
             </div>
           </div>
 
           <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
-            <span className="font-semibold text-slate-700">Sync Queue: {syncQueue.length} pending operations</span>
+            <span className="font-semibold text-slate-700">Sync Queue: {syncQueue.length} pending operations{syncing ? ' · syncing…' : ''}</span>
             <button
               onClick={handleTestQueueOfflineItem}
               className="px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold"
             >
-              Enqueue Offline Draft Test
+              Enqueue Maintenance Draft
+            </button>
+            <button
+              onClick={() => void syncPendingQueue()}
+              disabled={!isOnline || syncing || syncQueue.length === 0}
+              className="px-3.5 py-1.5 rounded-xl bg-campus-50 hover:bg-campus-100 text-campus-800 font-bold disabled:opacity-40"
+            >
+              Sync now
             </button>
           </div>
         </div>
@@ -141,19 +153,22 @@ export const MobileOfflinePWA: React.FC = () => {
         <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm space-y-4">
           <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
             <KeyRound className="w-4 h-4 text-red-600" />
-            Controlled Emergency Outage Protocol Simulator
+            Server-Verified Emergency Override
           </h3>
           <p className="text-xs text-slate-500">
-            Dual-officer override when campus WAN/LAN connections are completely down
+            Dual-officer check that requires the campus API and database to be reachable; this is not an offline hardware override
           </p>
 
           <div className="space-y-3 text-xs">
+            <p className="text-[11px] text-amber-700">Available only to signed-in security guards and authorized administrators. Configure the emergency PIN on the server; do not share it with students.</p>
             <div>
               <label className="font-medium text-slate-700 block mb-1">Student University ID</label>
               <input
                 type="text"
                 readOnly
-                value={user?.university_id || 'MUR2600425'}
+                value={studentUniversityId}
+                onChange={(e) => setStudentUniversityId(e.target.value)}
+                placeholder="Enter student university ID"
                 className="w-full bg-slate-100 border border-slate-200 rounded-xl px-3 py-2 font-mono text-slate-700"
               />
             </div>

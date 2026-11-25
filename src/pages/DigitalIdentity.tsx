@@ -15,7 +15,8 @@ export const DigitalIdentity: React.FC = () => {
   const [qrError, setQrError] = useState('');
   const [secondsRemaining, setSecondsRemaining] = useState(60);
   const [loading, setLoading] = useState(true);
-  const [certInput, setCertInput] = useState('a7f92b49c011e48f7d9321c43b9281aef12d4a781b49021');
+  const [certInput, setCertInput] = useState('');
+  const [certChecking, setCertChecking] = useState(false);
   const [certVerified, setCertVerified] = useState<any | null>(null);
 
   useEffect(() => {
@@ -112,21 +113,34 @@ export const DigitalIdentity: React.FC = () => {
     }
   };
 
-  const handleVerifyCert = () => {
-    if (certInput.trim().length > 10) {
-      setCertVerified({
-        valid: true,
-        student: `${user?.name || 'Student'} (${user?.university_id || 'MUR2600425'})`,
-        award: 'Academic Excellence Dean List Award 2025-2026',
-        cgpa: '9.62 / 10.0',
-        issuer: getInstitutionName(tenant?.id, tenant?.name)
+  const handleVerifyCert = async () => {
+    setCertChecking(true);
+    setCertVerified(null);
+    try {
+      const response = await fetch('/api/identity/verify-certificate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Tenant-ID': tenant?.id || 'tenant_apex',
+          Authorization: 'Bearer ' + localStorage.getItem('smart_campus_token')
+        },
+        body: JSON.stringify({ credential: certInput.trim() })
       });
-    } else {
-      setCertVerified({ valid: false });
+      const data = await response.json();
+      if (!response.ok || !data.valid) {
+        setCertVerified({ valid: false, message: data.message || data.error || 'Certificate was not found in the institutional registry.' });
+        return;
+      }
+      setCertVerified({ valid: true, ...data.certificate, issuer: getInstitutionName(tenant?.id, tenant?.name) });
+    } catch (error) {
+      setCertVerified({ valid: false, message: error instanceof Error ? error.message : 'Certificate verification failed.' });
+    } finally {
+      setCertChecking(false);
     }
   };
 
   const isCardActive = cardData?.user?.card_status === 'ACTIVE';
+  const canReactivateCard = ['UNIVERSITY_ADMIN', 'CAMPUS_ADMIN', 'PLATFORM_OWNER'].includes(user?.role || '');
 
   return (
     <div className="space-y-6">
@@ -153,6 +167,8 @@ export const DigitalIdentity: React.FC = () => {
           <button
             type="button"
             onClick={() => handleToggleCardStatus(isCardActive ? 'DEACTIVATED' : 'ACTIVE')}
+            disabled={!isCardActive && !canReactivateCard}
+            title={!isCardActive && !canReactivateCard ? 'Contact campus administration to reactivate this card.' : undefined}
             className={`px-4 py-2.5 rounded-2xl font-bold text-xs flex items-center gap-2 transition-all ${
               isCardActive
                 ? 'bg-red-50 text-red-700 hover:bg-red-100 border border-red-200'
@@ -160,7 +176,7 @@ export const DigitalIdentity: React.FC = () => {
             }`}
           >
             <Lock className="w-4 h-4" />
-            <span>{isCardActive ? 'Deactivate / Lost Card Lock' : 'Reactivate Smart ID Card'}</span>
+            <span>{isCardActive ? 'Deactivate / Lost Card Lock' : canReactivateCard ? 'Reactivate Smart ID Card' : 'Contact admin to reactivate'}</span>
           </button>
         </div>
       </div>
@@ -263,9 +279,9 @@ export const DigitalIdentity: React.FC = () => {
             {/* Anti-fraud security footer */}
             <div className="mt-6 pt-4 border-t border-white/10 flex items-center justify-between text-[10px] text-campus-200">
               <span className="flex items-center gap-1">
-                <Shield className="w-3.5 h-3.5 text-campus-400" /> Screen-Capture & Replay Protected
+                <Shield className="w-3.5 h-3.5 text-campus-400" /> Short-lived, single-use QR credential
               </span>
-              <span className="font-mono">Security Seed Hash: {cardData?.dynamicQR?.token?.slice(0, 16)}...</span>
+              <span className="font-mono">QR Token Fingerprint: {cardData?.dynamicQR?.token?.slice(0, 16)}...</span>
             </div>
           </div>
         </div>
@@ -275,15 +291,15 @@ export const DigitalIdentity: React.FC = () => {
           <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm space-y-4">
             <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
               <ShieldCheck className="w-4 h-4 text-emerald-600" />
-              Public Certificate Verifier
+              Institutional Certificate Registry
             </h3>
             <p className="text-xs text-slate-500">
-              Instant verification for employers and graduate schools against blockchain / SHA-256 institutional registry
+              Search the signed-in institution's registry by certificate ID or SHA-256 hash. This is a database lookup, not a blockchain service.
             </p>
 
             <div className="space-y-3 text-xs">
               <div>
-                <label className="font-semibold text-slate-700 block mb-1">Cryptographic Hash</label>
+                <label className="font-semibold text-slate-700 block mb-1">Certificate ID or SHA-256 hash</label>
                 <textarea
                   rows={2}
                   value={certInput}
@@ -294,9 +310,10 @@ export const DigitalIdentity: React.FC = () => {
 
               <button
                 onClick={handleVerifyCert}
-                className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs"
+                disabled={certChecking || !certInput.trim()}
+                className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs disabled:opacity-50"
               >
-                Validate Authentic Seal
+                {certChecking ? 'Checking registry…' : 'Validate certificate in registry'}
               </button>
 
               {certVerified && (
@@ -304,12 +321,15 @@ export const DigitalIdentity: React.FC = () => {
                   certVerified.valid ? 'bg-emerald-50 border-emerald-200 text-emerald-950' : 'bg-red-50 border-red-200 text-red-950'
                 }`}>
                   <div className="font-bold flex items-center gap-1.5 text-sm">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    Authentic Verified University Degree / Award
+                    {certVerified.valid ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <AlertTriangle className="w-4 h-4 text-red-600" />}
+                    {certVerified.valid ? 'Certificate is registered' : 'Certificate not verified'}
                   </div>
-                  <div>Student: <strong>{certVerified.student}</strong></div>
-                  <div>Degree Title: <strong>{certVerified.award}</strong></div>
+                  {!certVerified.valid && <div>{certVerified.message}</div>}
+                  <div>Student: <strong>{certVerified.student}</strong> ({certVerified.universityId})</div>
+                  <div>Certificate: <strong>{certVerified.title}</strong></div>
+                  <div>Type: <strong>{certVerified.type}</strong> · Issued: {certVerified.issueDate}</div>
                   <div className="text-[11px] text-slate-600">Issuer: {certVerified.issuer}</div>
+                  <div className="break-all text-[10px] text-slate-500">Hash: {certVerified.cryptographicHash}</div>
                 </div>
               )}
             </div>

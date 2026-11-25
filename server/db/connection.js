@@ -11,7 +11,8 @@ if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
 }
 
-const dbPath = path.join(dataDir, 'smart_campus.db');
+const dbPath = process.env.DATABASE_PATH || path.join(dataDir, 'smart_campus.db');
+fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 const db = new DatabaseSync(dbPath);
 
 try {

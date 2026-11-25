@@ -40,8 +40,9 @@ export const App: React.FC = () => {
   const { user, tenant, loading, login } = useAuth();
   const [currentTab, setCurrentTab] = useState<NavTab>('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [signInEmail, setSignInEmail] = useState('aarav.patel@student.apex.edu.in');
-  const [signInPassword, setSignInPassword] = useState('password123');
+  const [signInEmail, setSignInEmail] = useState('');
+  const [signInPassword, setSignInPassword] = useState('');
+  const [signInMfaCode, setSignInMfaCode] = useState('');
   const [signInError, setSignInError] = useState('');
   const [signingIn, setSigningIn] = useState(false);
 
@@ -67,9 +68,9 @@ export const App: React.FC = () => {
       event.preventDefault();
       setSigningIn(true);
       setSignInError('');
-      const success = await login(signInEmail, signInPassword, tenant?.id || 'tenant_apex');
+      const success = await login(signInEmail, signInPassword, tenant?.id || 'tenant_apex', signInMfaCode);
       if (!success) {
-        setSignInError('Invalid email or password. Check the demo account details and try again.');
+        setSignInError('Sign-in failed. Check your credentials and any required authenticator code.');
       }
       setSigningIn(false);
     };
@@ -101,6 +102,19 @@ export const App: React.FC = () => {
               required
               value={signInPassword}
               onChange={(event) => setSignInPassword(event.target.value)}
+              className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-campus-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1.5">Authenticator code (for MFA-enabled accounts)</label>
+            <input
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              pattern="[0-9]{6}"
+              value={signInMfaCode}
+              onChange={(event) => setSignInMfaCode(event.target.value.replace(/\\D/g, '').slice(0, 6))}
               className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-campus-500"
             />
           </div>

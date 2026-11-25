@@ -1,4 +1,4 @@
-import crypto from 'node:crypto';
+import { hashPassword } from '../security/passwords.js';
 import db from './connection.js';
 import { seedMewarCatalog } from './mewarCatalog.js';
 import { seedMewarStudentRoster } from './mewarStudentRoster.js';
@@ -17,8 +17,6 @@ export function seedDatabase() {
 
   console.log('Seeding Smart Campus Multi-Tenant SaaS database...');
 
-  const hashPassword = (pwd) => crypto.createHash('sha256').update(pwd).digest('hex');
-  const defaultPassHash = hashPassword('password123');
 
   // 1. TENANTS
   db.exec(`
@@ -39,19 +37,19 @@ export function seedDatabase() {
   // 2. USERS
   db.exec(`
     INSERT INTO users (id, tenant_id, campus_id, university_id, name, email, password_hash, role, department, phone, photo_url, card_status, mfa_enabled) VALUES
-    ('user_owner', 'tenant_apex', 'campus_apex_main', 'GLOBAL-ROOT-001', 'Vikramaditya Roy (Platform Owner)', 'owner@smartcampus.cloud', '${defaultPassHash}', 'PLATFORM_OWNER', 'Executive HQ', '+91 98888 00000', 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150', 'ACTIVE', 1),
-    ('user_admin_apex', 'tenant_apex', 'campus_apex_main', 'APEX-ADM-001', 'Dr. Radhika Sharma (Dean)', 'dean@apex.edu.in', '${defaultPassHash}', 'UNIVERSITY_ADMIN', 'Computer Science & Engineering', '+91 98111 22334', 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150', 'ACTIVE', 1),
-    ('user_faculty_1', 'tenant_apex', 'campus_apex_main', 'APEX-FAC-104', 'Prof. Arvind Namboodiri', 'arvind.n@apex.edu.in', '${defaultPassHash}', 'FACULTY', 'Computer Science & Engineering', '+91 98222 33445', 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150', 'ACTIVE', 0),
-    ('user_student_1', 'tenant_apex', 'campus_apex_main', 'MUR2600425', 'Md Aarif Hussain', 'aarav.patel@student.apex.edu.in', '${defaultPassHash}', 'STUDENT', 'Computer Science & Engineering', '+91 98333 44556', 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150', 'ACTIVE', 0),
-    ('user_student_2', 'tenant_apex', 'campus_apex_main', 'APEX-2024-CS-0850', 'Ananya Sengupta', 'ananya.s@student.apex.edu.in', '${defaultPassHash}', 'STUDENT', 'Computer Science & Engineering', '+91 98444 55667', 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150', 'ACTIVE', 0),
-    ('user_parent_1', 'tenant_apex', 'campus_apex_main', 'APEX-PAR-901', 'Rajesh Patel', 'rajesh.patel@gmail.com', '${defaultPassHash}', 'PARENT', 'Guardian', '+91 98555 66778', 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150', 'ACTIVE', 0),
-    ('user_guard_1', 'tenant_apex', 'campus_apex_main', 'APEX-SEC-012', 'Havildar Gurpreet Singh', 'security.gate1@apex.edu.in', '${defaultPassHash}', 'SECURITY_GUARD', 'Campus Safety & Vigilance', '+91 98666 77889', 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150', 'ACTIVE', 0),
-    ('user_maint_1', 'tenant_apex', 'campus_apex_main', 'APEX-MNT-045', 'Manoj Kumar (Electrical)', 'facilities.tech@apex.edu.in', '${defaultPassHash}', 'MAINTENANCE_STAFF', 'Facilities & Civil Services', '+91 98777 88990', 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=150', 'ACTIVE', 0),
-    ('user_lib_1', 'tenant_apex', 'campus_apex_main', 'APEX-LIB-003', 'Dr. Sumita Das', 'library@apex.edu.in', '${defaultPassHash}', 'LIBRARIAN', 'Central University Library', '+91 98888 99001', 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150', 'ACTIVE', 0),
-    ('user_trans_1', 'tenant_apex', 'campus_apex_main', 'APEX-TRN-008', 'Balwinder Singh (Route Lead)', 'transport@apex.edu.in', '${defaultPassHash}', 'TRANSPORT_COORDINATOR', 'Fleet Operations', '+91 98999 00112', 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150', 'ACTIVE', 0),
-    ('user_cafe_1', 'tenant_apex', 'campus_apex_main', 'APEX-CAF-002', 'Chef Ramesh Nair', 'cafeteria@apex.edu.in', '${defaultPassHash}', 'CAFETERIA_STAFF', 'Dining & Mess Services', '+91 98111 00223', 'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=150', 'ACTIVE', 0),
+    ('user_owner', 'tenant_apex', 'campus_apex_main', 'GLOBAL-ROOT-001', 'Vikramaditya Roy (Platform Owner)', 'owner@smartcampus.cloud', '${hashPassword('password123')}', 'PLATFORM_OWNER', 'Executive HQ', '+91 98888 00000', 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150', 'ACTIVE', 0),
+    ('user_admin_apex', 'tenant_apex', 'campus_apex_main', 'APEX-ADM-001', 'Dr. Radhika Sharma (Dean)', 'dean@apex.edu.in', '${hashPassword('password123')}', 'UNIVERSITY_ADMIN', 'Computer Science & Engineering', '+91 98111 22334', 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150', 'ACTIVE', 0),
+    ('user_faculty_1', 'tenant_apex', 'campus_apex_main', 'APEX-FAC-104', 'Prof. Arvind Namboodiri', 'arvind.n@apex.edu.in', '${hashPassword('password123')}', 'FACULTY', 'Computer Science & Engineering', '+91 98222 33445', 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150', 'ACTIVE', 0),
+    ('user_student_1', 'tenant_apex', 'campus_apex_main', 'MUR2600425', 'Md Aarif Hussain', 'aarav.patel@student.apex.edu.in', '${hashPassword('password123')}', 'STUDENT', 'Computer Science & Engineering', '+91 98333 44556', 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150', 'ACTIVE', 0),
+    ('user_student_2', 'tenant_apex', 'campus_apex_main', 'APEX-2024-CS-0850', 'Ananya Sengupta', 'ananya.s@student.apex.edu.in', '${hashPassword('password123')}', 'STUDENT', 'Computer Science & Engineering', '+91 98444 55667', 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150', 'ACTIVE', 0),
+    ('user_parent_1', 'tenant_apex', 'campus_apex_main', 'APEX-PAR-901', 'Rajesh Patel', 'rajesh.patel@gmail.com', '${hashPassword('password123')}', 'PARENT', 'Guardian', '+91 98555 66778', 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150', 'ACTIVE', 0),
+    ('user_guard_1', 'tenant_apex', 'campus_apex_main', 'APEX-SEC-012', 'Havildar Gurpreet Singh', 'security.gate1@apex.edu.in', '${hashPassword('password123')}', 'SECURITY_GUARD', 'Campus Safety & Vigilance', '+91 98666 77889', 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150', 'ACTIVE', 0),
+    ('user_maint_1', 'tenant_apex', 'campus_apex_main', 'APEX-MNT-045', 'Manoj Kumar (Electrical)', 'facilities.tech@apex.edu.in', '${hashPassword('password123')}', 'MAINTENANCE_STAFF', 'Facilities & Civil Services', '+91 98777 88990', 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=150', 'ACTIVE', 0),
+    ('user_lib_1', 'tenant_apex', 'campus_apex_main', 'APEX-LIB-003', 'Dr. Sumita Das', 'library@apex.edu.in', '${hashPassword('password123')}', 'LIBRARIAN', 'Central University Library', '+91 98888 99001', 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150', 'ACTIVE', 0),
+    ('user_trans_1', 'tenant_apex', 'campus_apex_main', 'APEX-TRN-008', 'Balwinder Singh (Route Lead)', 'transport@apex.edu.in', '${hashPassword('password123')}', 'TRANSPORT_COORDINATOR', 'Fleet Operations', '+91 98999 00112', 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150', 'ACTIVE', 0),
+    ('user_cafe_1', 'tenant_apex', 'campus_apex_main', 'APEX-CAF-002', 'Chef Ramesh Nair', 'cafeteria@apex.edu.in', '${hashPassword('password123')}', 'CAFETERIA_STAFF', 'Dining & Mess Services', '+91 98111 00223', 'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=150', 'ACTIVE', 0),
     -- Metro Tech Tenant User
-    ('user_admin_metro', 'tenant_metro', 'campus_metro_main', 'METRO-ADM-001', 'Prof. K. Venkatesh', 'provost@metro.edu.in', '${defaultPassHash}', 'UNIVERSITY_ADMIN', 'Information Technology', '+91 98222 11000', 'https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?w=150', 'ACTIVE', 0);
+    ('user_admin_metro', 'tenant_metro', 'campus_metro_main', 'METRO-ADM-001', 'Prof. K. Venkatesh', 'provost@metro.edu.in', '${hashPassword('password123')}', 'UNIVERSITY_ADMIN', 'Information Technology', '+91 98222 11000', 'https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?w=150', 'ACTIVE', 0);
 
     UPDATE users SET parent_id = 'user_parent_1' WHERE id = 'user_student_1';
   `);
@@ -314,7 +312,6 @@ function applyMewarDemoProfile() {
     UPDATE users SET university_id = ?, name = ?, card_status = 'ACTIVE' WHERE id = ? AND tenant_id = ?
   `).run('MUR2600425', 'Md Aarif Hussain', student.id, student.tenant_id);
 
-  const demoPasswordHash = crypto.createHash('sha256').update('password123').digest('hex');
   const insertDemoContact = db.prepare(`
     INSERT OR IGNORE INTO users (
       id, tenant_id, campus_id, university_id, name, email, password_hash,
@@ -327,7 +324,7 @@ function applyMewarDemoProfile() {
     'MUR-WARDEN-001',
     'Mewar Campus Warden (Demo)',
     'warden@mewaruniversity.demo',
-    demoPasswordHash,
+    hashPassword('password123'),
     'WARDEN',
     'Student Welfare'
   );
@@ -336,7 +333,7 @@ function applyMewarDemoProfile() {
     'MUR-COUNSELLOR-001',
     'Mewar Campus Counsellor (Demo)',
     'counsellor@mewaruniversity.demo',
-    demoPasswordHash,
+    hashPassword('password123'),
     'COUNSELLOR',
     'Student Counselling'
   );
@@ -358,7 +355,7 @@ function applyMewarDemoProfile() {
       'Computer Science & Engineering', 'ACTIVE', 0)
   `);
   for (const [id, universityId, name, email] of faculty) {
-    insertFaculty.run(id, universityId, name, email, demoPasswordHash);
+    insertFaculty.run(id, universityId, name, email, hashPassword('password123'));
   }
 }
 

@@ -4,7 +4,7 @@ import { useNotifications } from '../context/NotificationContext';
 import { Building2, Calendar, Clock, CheckCircle2, AlertTriangle, Plus, Users } from 'lucide-react';
 
 export const ResourceBooking: React.FC = () => {
-  const { tenant } = useAuth();
+  const { tenant, user } = useAuth();
   const { addNotification } = useNotifications();
 
   const [resources, setResources] = useState<any[]>([]);
@@ -15,7 +15,7 @@ export const ResourceBooking: React.FC = () => {
   // Booking Form
   const [resourceId, setResourceId] = useState('');
   const [purpose, setPurpose] = useState('');
-  const [date, setDate] = useState('2026-11-06');
+  const [date, setDate] = useState(() => new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
   const [startTime, setStartTime] = useState('14:00');
   const [endTime, setEndTime] = useState('16:00');
   const [submitting, setSubmitting] = useState(false);
@@ -67,7 +67,7 @@ export const ResourceBooking: React.FC = () => {
       });
 
       if (res.ok) {
-        addNotification('Slot Reserved', 'Resource reservation submitted and approved.', 'SUCCESS');
+        addNotification('Booking Request Submitted', 'The request is pending faculty or campus approval. It is not reserved until approved.', 'INFO');
         setShowModal(false);
         setPurpose('');
         fetchResources();
@@ -77,6 +77,26 @@ export const ResourceBooking: React.FC = () => {
       }
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleReview = async (bookingId: string, decision: 'APPROVED' | 'REJECTED') => {
+    try {
+      const response = await fetch('/api/resources/review', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Tenant-ID': tenant?.id || 'tenant_apex',
+          Authorization: 'Bearer ' + localStorage.getItem('smart_campus_token')
+        },
+        body: JSON.stringify({ bookingId, decision })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || data.error || 'Unable to review booking.');
+      addNotification('Booking Review Saved', 'Resource request marked ' + decision.toLowerCase() + '.', 'SUCCESS');
+      await fetchResources();
+    } catch (error) {
+      addNotification('Booking Review Failed', error instanceof Error ? error.message : 'Please retry.', 'WARNING');
     }
   };
 
@@ -124,12 +144,13 @@ export const ResourceBooking: React.FC = () => {
               </div>
 
               <div className="pt-3 border-t border-slate-200/60 flex items-center justify-between text-[11px]">
-                <span className="text-emerald-700 font-bold flex items-center gap-1">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Available
+                <span className={`font-bold flex items-center gap-1 ${res.status === 'AVAILABLE' ? 'text-emerald-700' : 'text-amber-700'}`}>
+                  <CheckCircle2 className="w-3.5 h-3.5" /> {res.status}
                 </span>
                 <button
                   onClick={() => { setResourceId(res.id); setShowModal(true); }}
-                  className="text-campus-600 hover:underline font-bold"
+                  disabled={res.status !== 'AVAILABLE'}
+                  className="text-campus-600 hover:underline font-bold disabled:opacity-40"
                 >
                   Book Slot
                 </button>
@@ -150,12 +171,20 @@ export const ResourceBooking: React.FC = () => {
                 <div className="font-bold text-slate-900 text-sm">{r.resource_name}</div>
                 <div className="text-slate-600 text-[11px]">{r.purpose} • Booked by: {r.booked_by_name}</div>
                 <div className="text-slate-400 text-[10px]">
-                  Date: {r.date} • Slot: {r.start_time} - {r.end_time} • Approver: {r.approved_by || 'Dean Office'}
+                  Date: {r.date} • Slot: {r.start_time} - {r.end_time} • Approver: {r.approved_by || 'Pending approval'}
                 </div>
               </div>
-              <span className="px-3 py-1 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                {r.approval_status}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className={`px-3 py-1 rounded-full text-[10px] font-bold ${r.approval_status === 'APPROVED' ? 'bg-emerald-100 text-emerald-800' : r.approval_status === 'REJECTED' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'}`}>
+                  {r.approval_status}
+                </span>
+                {r.approval_status === 'PENDING' && ['UNIVERSITY_ADMIN', 'CAMPUS_ADMIN', 'PLATFORM_OWNER'].includes(user?.role || '') && (
+                  <>
+                    <button onClick={() => void handleReview(r.id, 'APPROVED')} className="text-[10px] font-bold text-emerald-700">Approve</button>
+                    <button onClick={() => void handleReview(r.id, 'REJECTED')} className="text-[10px] font-bold text-red-700">Reject</button>
+                  </>
+                )}
+              </div>
             </div>
           ))}
         </div>

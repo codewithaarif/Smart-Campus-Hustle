@@ -1153,3 +1153,38 @@ CREATE INDEX IF NOT EXISTS idx_attendance_date ON attendance_records(date);
 CREATE INDEX IF NOT EXISTS idx_audit_tenant ON audit_logs(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_dues_student ON student_fee_dues(student_id);
 CREATE INDEX IF NOT EXISTS idx_grievances_tenant ON grievances(tenant_id);
+
+
+-- One pending payment order per student fee due. This limits duplicate open
+-- orders while leaving historical SUCCESS/FAILED transactions untouched.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_single_pending_fee_order
+ON payment_transactions (tenant_id, user_id, fee_due_id)
+WHERE status = 'PENDING' AND fee_due_id IS NOT NULL;
+
+-- Single-use nonce ledger for short-lived dynamic QR credentials.
+CREATE TABLE IF NOT EXISTS used_qr_tokens (
+    nonce TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    expires_at DATETIME NOT NULL,
+    used_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_used_qr_tokens_expiry ON used_qr_tokens (expires_at);
+
+-- Idempotency ledger for operations received from offline clients.
+CREATE TABLE IF NOT EXISTS offline_sync_records (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    client_item_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    resource_id TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (tenant_id, user_id, client_item_id),
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_offline_sync_user
+ON offline_sync_records (tenant_id, user_id, created_at DESC);

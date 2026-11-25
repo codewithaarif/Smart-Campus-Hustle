@@ -7,9 +7,10 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "server": "node server/index.mjs",
-    "start": "node server/index.mjs",
-    "test": "node --test tests/*.test.mjs"
+    "server": "node --env-file-if-exists=.env server/index.mjs",
+    "start": "node --env-file-if-exists=.env server/index.mjs",
+    "test": "node --import ./tests/test-env.mjs --test --test-concurrency=1",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "canvas-confetti": "^1.9.3",

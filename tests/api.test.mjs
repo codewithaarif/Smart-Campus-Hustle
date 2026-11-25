@@ -633,31 +633,73 @@ test('SOS sends persistent in-app notifications to parent, warden, and counsello
   }
 });
 
-test('Module 6: Razorpay Test Mode Order and Signature Verification issues receipt', () => {
-  const order = PaymentService.createOrder({
-    tenantId: 'tenant_apex',
-    userId: 'user_student_1',
-    feeDueId: 'due_1',
-    amount: 15000.0
-  });
+test('Module 6: payment orders derive balance server-side and reject forged signatures', async () => {
+  const dueId = 'due_test_payment_secure';
+  const tamperDueId = 'due_test_payment_forged';
+  const insertDue = db.prepare(`
+    INSERT INTO student_fee_dues
+      (id, tenant_id, student_id, fee_structure_id, total_amount, amount_paid, balance_amount, status)
+    VALUES (?, 'tenant_apex', 'user_student_1', 'fee_1', ?, 0, ?, 'UNPAID')
+  `);
+  insertDue.run(dueId, 15000, 15000);
+  insertDue.run(tamperDueId, 9000, 9000);
 
-  assert.ok(order.orderId.startsWith('order_'));
-  assert.strictEqual(order.amount, 15000.0);
+  try {
+    const order = await PaymentService.createOrder({
+      tenantId: 'tenant_apex',
+      userId: 'user_student_1',
+      feeDueId: dueId
+    });
+    assert.ok(order.orderId.startsWith('order_'));
+    assert.strictEqual(order.amount, 15000);
+    assert.strictEqual(order.amountPaise, 1500000);
 
-  const completion = PaymentService.verifyAndCompletePayment({
-    tenantId: 'tenant_apex',
-    orderId: order.orderId,
-    paymentId: 'pay_test_succ_123',
-    signature: 'sig_test_mock_valid_12345',
-    feeDueId: 'due_1',
-    amount: 15000.0
-  });
+    const completion = await PaymentService.verifyAndCompletePayment({
+      tenantId: 'tenant_apex',
+      userId: 'user_student_1',
+      orderId: order.orderId,
+      paymentId: 'pay_mock_secure_123',
+      signature: 'MOCK_APPROVED'
+    });
+    assert.strictEqual(completion.success, true);
+    assert.strictEqual(completion.paymentMode, 'MOCK');
+    assert.ok(completion.receiptNumber.startsWith('RCP-'));
+    assert.ok(completion.digitalReceiptPdfHash);
 
-  assert.strictEqual(completion.success, true);
-  assert.ok(completion.receiptNumber.startsWith('RCP-'));
-  assert.ok(completion.digitalReceiptPdfHash);
+    const replay = await PaymentService.verifyAndCompletePayment({
+      tenantId: 'tenant_apex',
+      userId: 'user_student_1',
+      orderId: order.orderId,
+      paymentId: 'pay_mock_secure_123',
+      signature: 'MOCK_APPROVED'
+    });
+    assert.strictEqual(replay.idempotent, true);
+
+    const forgedOrder = await PaymentService.createOrder({
+      tenantId: 'tenant_apex',
+      userId: 'user_student_1',
+      feeDueId: tamperDueId
+    });
+    await assert.rejects(PaymentService.verifyAndCompletePayment({
+      tenantId: 'tenant_apex',
+      userId: 'user_student_1',
+      orderId: forgedOrder.orderId,
+      paymentId: 'pay_forged_001',
+      signature: 'sig_test_arbitrary_string'
+    }), /invalid|mock|approval/i);
+
+    await assert.rejects(PaymentService.verifyAndCompletePayment({
+      tenantId: 'tenant_metro',
+      userId: 'user_student_1',
+      orderId: forgedOrder.orderId,
+      paymentId: 'pay_cross_tenant_001',
+      signature: 'MOCK_APPROVED'
+    }), /not found/i);
+  } finally {
+    db.prepare('DELETE FROM payment_transactions WHERE fee_due_id IN (?, ?)').run(dueId, tamperDueId);
+    db.prepare('DELETE FROM student_fee_dues WHERE id IN (?, ?)').run(dueId, tamperDueId);
+  }
 });
-
 test('Module 7: Digital Library allows book reservation and updates copy count', () => {
   const books = db.prepare('SELECT * FROM library_books WHERE tenant_id = ?').all('tenant_apex');
   assert.ok(books.length >= 2, 'Library books should exist');
@@ -712,6 +754,9 @@ test('Module 17: Dynamic Cryptographic QR Generation and Signature Verification'
     const verification = DynamicQRService.verifyDynamicIDToken(dynamicQR.token);
     assert.strictEqual(verification.valid, true);
     assert.strictEqual(verification.user.id, testUserId);
+    const replay = DynamicQRService.verifyDynamicIDToken(dynamicQR.token, 'tenant_apex');
+    assert.strictEqual(replay.valid, false);
+    assert.strictEqual(replay.error, 'QR_REPLAYED');
     assert.strictEqual(DynamicQRService.verifyDynamicIDToken(dynamicQR.token, 'tenant_metro').valid, false);
   } finally {
     db.prepare('DELETE FROM users WHERE id = ?').run(testUserId);

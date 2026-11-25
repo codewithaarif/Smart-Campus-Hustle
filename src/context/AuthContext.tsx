@@ -9,158 +9,166 @@ interface AuthContextType {
   activeCampus: Campus | null;
   tenantsList: Tenant[];
   loading: boolean;
-  login: (email: string, password?: string, tenantId?: string) => Promise<boolean>;
+  login: (email: string, password: string, tenantId?: string, mfaCode?: string) => Promise<boolean>;
   logout: () => void;
-  switchTenant: (tenantId: string) => void;
+  switchTenant: (tenantId: string) => Promise<void>;
   switchCampus: (campusId: string) => void;
-  switchDemoRole: (user: Partial<User>) => void;
+  switchDemoRole: (user: Partial<User>) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(localStorage.getItem('smart_campus_token'));
+  const [token, setToken] = useState<string | null>(() => localStorage.getItem('smart_campus_token'));
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [campuses, setCampuses] = useState<Campus[]>([]);
   const [activeCampus, setActiveCampus] = useState<Campus | null>(null);
   const [tenantsList, setTenantsList] = useState<Tenant[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const normalizeUser = (rawUser: any): User => ({
-    id: rawUser.id,
-    tenant_id: rawUser.tenantId || rawUser.tenant_id,
-    campus_id: rawUser.campusId || rawUser.campus_id,
-    university_id: rawUser.universityId || rawUser.university_id,
-    name: rawUser.name,
-    email: rawUser.email,
-    role: rawUser.role,
-    department: rawUser.department,
-    phone: rawUser.phone,
-    photo_url: rawUser.photoUrl || rawUser.photo_url,
-    card_status: rawUser.cardStatus || rawUser.card_status || 'ACTIVE',
-    mfa_enabled: rawUser.mfaEnabled || rawUser.mfa_enabled
+  const normalizeUser = (raw: any): User => ({
+    id: raw.id,
+    tenant_id: raw.tenantId || raw.tenant_id,
+    campus_id: raw.campusId || raw.campus_id,
+    university_id: raw.universityId || raw.university_id,
+    name: raw.name,
+    email: raw.email,
+    role: raw.role,
+    department: raw.department,
+    phone: raw.phone,
+    photo_url: raw.photoUrl || raw.photo_url,
+    card_status: raw.cardStatus || raw.card_status || 'ACTIVE',
+    mfa_enabled: Boolean(raw.mfaEnabled ?? raw.mfa_enabled)
   });
 
-  // Fetch initial tenant & demo user profile
-  useEffect(() => {
-    async function initAuth() {
-      try {
-        const saasRes = await fetch('/api/saas/tenants', {
-          headers: { 'X-Tenant-ID': localStorage.getItem('smart_campus_tenant') || 'tenant_apex' }
-        });
-        if (saasRes.ok) {
-          const data = await saasRes.json();
-          setTenantsList(data.tenants || []);
-          setTenant(data.currentTenant || data.tenants[0] || null);
-          setCampuses(data.campuses || []);
-          if (data.campuses && data.campuses.length > 0) {
-            setActiveCampus(data.campuses[0]);
-          }
-        }
-
-        // Try getting logged in user or default to student Aarav for instant demo
-        const savedToken = localStorage.getItem('smart_campus_token');
-        if (savedToken) {
-          const meRes = await fetch('/api/auth/me', {
-            headers: { Authorization: `Bearer ${savedToken}` }
-          });
-          if (meRes.ok) {
-            const meData = await meRes.json();
-            setUser(normalizeUser(meData.user));
-            setLoading(false);
-            return;
-          }
-        }
-
-        // Auto login demo student if no session
-        await login('aarav.patel@student.apex.edu.in', 'password123', 'tenant_apex');
-      } catch (err) {
-        console.error('Auth initialization error:', err);
-      } finally {
-        setLoading(false);
+  const loadTenantContext = async (tenantId: string, accessToken: string) => {
+    const response = await fetch('/api/saas/tenants', {
+      headers: {
+        'X-Tenant-ID': tenantId,
+        Authorization: 'Bearer ' + accessToken
       }
-    }
+    });
+    if (!response.ok) throw new Error('Unable to load institution context.');
+    const data = await response.json();
+    setTenantsList(data.tenants || []);
+    setTenant(data.currentTenant || null);
+    setCampuses(data.campuses || []);
+    setActiveCampus(data.campuses?.[0] || null);
+  };
 
-    initAuth();
+  useEffect(() => {
+    let cancelled = false;
+    const initialize = async () => {
+      try {
+        const savedToken = localStorage.getItem('smart_campus_token');
+        if (!savedToken) {
+          setUser(null);
+          setToken(null);
+          return;
+        }
+
+        const response = await fetch('/api/auth/me', {
+          headers: { Authorization: 'Bearer ' + savedToken }
+        });
+        if (!response.ok) {
+          localStorage.removeItem('smart_campus_token');
+          localStorage.removeItem('smart_campus_tenant');
+          setUser(null);
+          setToken(null);
+          return;
+        }
+
+        const data = await response.json();
+        if (cancelled) return;
+        const restoredUser = normalizeUser(data.user);
+        setUser(restoredUser);
+        setToken(savedToken);
+        await loadTenantContext(restoredUser.tenant_id, savedToken);
+      } catch (error) {
+        console.error('Authentication initialization failed:', error);
+        if (!cancelled) {
+          localStorage.removeItem('smart_campus_token');
+          setToken(null);
+          setUser(null);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    void initialize();
+    return () => { cancelled = true; };
   }, []);
 
-  const login = async (email: string, password = 'password123', tenantId = 'tenant_apex') => {
+  const login = async (email: string, password: string, tenantId = 'tenant_apex', mfaCode = '') => {
     try {
-      const res = await fetch('/api/auth/login', {
+      const response = await fetch('/api/auth/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, tenantId })
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Tenant-ID': tenantId
+        },
+        body: JSON.stringify({ email, password, tenantId, mfaCode })
       });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.token || !data.user) return false;
 
-      if (!res.ok) return false;
-
-      const data = await res.json();
-      setToken(data.token);
-      setUser(normalizeUser(data.user));
       localStorage.setItem('smart_campus_token', data.token);
       localStorage.setItem('smart_campus_tenant', data.user.tenantId);
-
-      // Refresh SaaS tenant details
-      const saasRes = await fetch('/api/saas/tenants', {
-        headers: { 'X-Tenant-ID': data.user.tenantId }
-      });
-      if (saasRes.ok) {
-        const saasData = await saasRes.json();
-        setTenant(saasData.currentTenant);
-        setCampuses(saasData.campuses || []);
-        setActiveCampus(saasData.campuses?.[0] || null);
-      }
-
+      setToken(data.token);
+      setUser(normalizeUser(data.user));
+      await loadTenantContext(data.user.tenantId, data.token);
       return true;
-    } catch {
+    } catch (error) {
+      console.error('Login failed:', error);
       return false;
     }
   };
 
   const logout = () => {
+    const savedToken = localStorage.getItem('smart_campus_token');
+    if (savedToken) {
+      void fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + savedToken }
+      }).catch(() => undefined);
+    }
+    localStorage.removeItem('smart_campus_token');
+    localStorage.removeItem('smart_campus_tenant');
     setUser(null);
     setToken(null);
-    localStorage.removeItem('smart_campus_token');
+    setTenant(null);
+    setCampuses([]);
+    setActiveCampus(null);
+    setTenantsList([]);
   };
 
   const switchTenant = async (tenantId: string) => {
-    localStorage.setItem('smart_campus_tenant', tenantId);
-    if (tenantId === 'tenant_metro') {
-      await login('provost@metro.edu.in', 'password123', 'tenant_metro');
-    } else {
-      await login('aarav.patel@student.apex.edu.in', 'password123', 'tenant_apex');
+    // A tenant change is a context switch for platform operators, never a demo-account impersonation.
+    if (!user || user.role !== 'PLATFORM_OWNER' || !token) return;
+    try {
+      await loadTenantContext(tenantId, token);
+      localStorage.setItem('smart_campus_tenant', tenantId);
+    } catch (error) {
+      console.error('Tenant switch failed:', error);
     }
   };
 
   const switchCampus = (campusId: string) => {
-    const found = campuses.find(c => c.id === campusId);
+    const found = campuses.find((campus) => campus.id === campusId);
     if (found) setActiveCampus(found);
   };
 
   const switchDemoRole = async (targetUser: Partial<User>) => {
-    if (targetUser.email) {
-      await login(targetUser.email, 'password123', targetUser.tenant_id || 'tenant_apex');
-    }
+    if (!import.meta.env.DEV || !targetUser.email) return;
+    await login(targetUser.email, 'password123', targetUser.tenant_id || 'tenant_apex');
   };
 
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        token,
-        tenant,
-        campuses,
-        activeCampus,
-        tenantsList,
-        loading,
-        login,
-        logout,
-        switchTenant,
-        switchCampus,
-        switchDemoRole
-      }}
-    >
+    <AuthContext.Provider value={{
+      user, token, tenant, campuses, activeCampus, tenantsList, loading,
+      login, logout, switchTenant, switchCampus, switchDemoRole
+    }}>
       {children}
     </AuthContext.Provider>
   );

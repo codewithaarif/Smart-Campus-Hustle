@@ -20,18 +20,56 @@ export const RazorpayModal: React.FC<RazorpayModalProps> = ({ isOpen, onClose, f
   const { tenant } = useAuth();
   const { addNotification } = useNotifications();
 
-  const [paymentMode, setPaymentMode] = useState<'UPI' | 'CARD' | 'NETBANKING'>('UPI');
-  const [upiId, setUpiId] = useState('aarav@okhdfcbank');
-  const [cardNumber, setCardNumber] = useState('4111 •••• •••• 1111');
+  const [checkoutMode, setCheckoutMode] = useState<'CHECKING' | 'LOCAL_MOCK' | 'RAZORPAY'>('CHECKING');
   const [processing, setProcessing] = useState(false);
   const [completedReceipt, setCompletedReceipt] = useState<any | null>(null);
 
   if (!isOpen || !feeDue) return null;
 
+  const completePayment = async (orderId: string, paymentId: string, signature: string) => {
+    const verifyRes = await fetch('/api/finance/razorpay/verify-payment', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Tenant-ID': tenant?.id || 'tenant_apex',
+        'Authorization': `Bearer ${localStorage.getItem('smart_campus_token')}`
+      },
+      body: JSON.stringify({ orderId, paymentId, signature })
+    });
+    const receipt = await verifyRes.json();
+    if (!verifyRes.ok || !receipt.success) {
+      throw new Error(receipt.message || receipt.error || 'Payment verification failed.');
+    }
+    setCompletedReceipt(receipt);
+    addNotification(
+      'Fee Payment Successful',
+      `₹${Number(receipt.amount).toLocaleString()} cleared for ${feeDue?.fee_type}. Receipt #${receipt.receiptNumber} issued.`,
+      'SUCCESS'
+    );
+    onPaymentSuccess();
+  };
+
+  const loadRazorpayCheckout = async () => {
+    if ((window as any).Razorpay) return;
+    await new Promise<void>((resolve, reject) => {
+      const existing = document.querySelector<HTMLScriptElement>('script[src="https://checkout.razorpay.com/v1/checkout.js"]');
+      if (existing) {
+        existing.addEventListener('load', () => resolve(), { once: true });
+        existing.addEventListener('error', () => reject(new Error('Razorpay Checkout could not be loaded.')), { once: true });
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.async = true;
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error('Razorpay Checkout could not be loaded.'));
+      document.body.appendChild(script);
+    });
+  };
+
   const handlePayNow = async () => {
     setProcessing(true);
     try {
-      // 1. Create Order
       const createRes = await fetch('/api/finance/razorpay/create-order', {
         method: 'POST',
         headers: {
@@ -39,44 +77,55 @@ export const RazorpayModal: React.FC<RazorpayModalProps> = ({ isOpen, onClose, f
           'X-Tenant-ID': tenant?.id || 'tenant_apex',
           'Authorization': `Bearer ${localStorage.getItem('smart_campus_token')}`
         },
-        body: JSON.stringify({
-          feeDueId: feeDue.id,
-          amount: feeDue.balance_amount
-        })
+        body: JSON.stringify({ feeDueId: feeDue.id })
       });
-
       const orderData = await createRes.json();
+      if (!createRes.ok || !orderData.success) {
+        throw new Error(orderData.message || orderData.error || 'Could not create payment order.');
+      }
 
-      // Simulate payment delay
-      await new Promise(r => setTimeout(r, 1200));
+      setCheckoutMode(orderData.mockMode === true ? 'LOCAL_MOCK' : 'RAZORPAY');
+      if (orderData.mockMode === true) {
+        // Explicit local-only mock flow. The server rejects this token in production.
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        const mockPaymentId = 'pay_mock_' + crypto.randomUUID();
+        await completePayment(orderData.orderId, mockPaymentId, 'MOCK_APPROVED');
+        return;
+      }
 
-      // 2. Verify Payment & Complete
-      const verifyRes = await fetch('/api/finance/razorpay/verify-payment', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Tenant-ID': tenant?.id || 'tenant_apex',
-          'Authorization': `Bearer ${localStorage.getItem('smart_campus_token')}`
+      await loadRazorpayCheckout();
+      const RazorpayConstructor = (window as any).Razorpay;
+      if (!RazorpayConstructor) throw new Error('Razorpay Checkout is unavailable.');
+
+      const checkout = new RazorpayConstructor({
+        key: orderData.keyId,
+        amount: orderData.amountPaise,
+        currency: orderData.currency,
+        name: getInstitutionName(tenant?.id, tenant?.name),
+        description: feeDue.fee_type.replaceAll('_', ' '),
+        order_id: orderData.orderId,
+        handler: async (response: any) => {
+          setProcessing(true);
+          try {
+            await completePayment(
+              response.razorpay_order_id,
+              response.razorpay_payment_id,
+              response.razorpay_signature
+            );
+          } catch (error: any) {
+            alert('Payment verification failed: ' + (error?.message || 'Unknown error'));
+          } finally {
+            setProcessing(false);
+          }
         },
-        body: JSON.stringify({
-          orderId: orderData.orderId,
-          paymentId: 'pay_test_' + Math.random().toString(36).slice(2, 10),
-          signature: 'sig_test_valid_mock_signature_' + Math.random().toString(36).slice(2, 8),
-          feeDueId: feeDue.id,
-          amount: feeDue.balance_amount
-        })
+        modal: {
+          ondismiss: () => setProcessing(false)
+        },
+        theme: { color: '#2563eb' }
       });
-
-      const receipt = await verifyRes.json();
-      setCompletedReceipt(receipt);
-      addNotification(
-        'Fee Payment Successful',
-        `₹${feeDue.balance_amount.toLocaleString()} cleared for ${feeDue.fee_type}. Receipt #${receipt.receiptNumber} issued.`,
-        'SUCCESS'
-      );
-      onPaymentSuccess();
-    } catch (err: any) {
-      alert('Payment processing failed: ' + err.message);
+      checkout.open();
+    } catch (error: any) {
+      alert('Payment processing failed: ' + (error?.message || 'Unknown error'));
     } finally {
       setProcessing(false);
     }
@@ -93,9 +142,9 @@ export const RazorpayModal: React.FC<RazorpayModalProps> = ({ isOpen, onClose, f
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-bold text-sm tracking-wide">Razorpay Checkout</span>
+                <span className="font-bold text-sm tracking-wide">{checkoutMode === 'LOCAL_MOCK' ? 'Local payment simulation' : 'Razorpay Checkout'}</span>
                 <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-emerald-500 text-white font-bold">
-                  TEST MODE
+                  {checkoutMode === 'LOCAL_MOCK' ? 'LOCAL MOCK' : checkoutMode === 'RAZORPAY' ? 'GATEWAY' : 'CONNECTING'}
                 </span>
               </div>
               <div className="text-xs text-blue-200">{getInstitutionName(tenant?.id, tenant?.name)}</div>
@@ -125,76 +174,10 @@ export const RazorpayModal: React.FC<RazorpayModalProps> = ({ isOpen, onClose, f
                 </div>
               </div>
 
-              {/* Payment Mode Selector */}
-              <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-2">Select Payment Method</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {[
-                    { id: 'UPI', label: 'Instant UPI', icon: QrCode },
-                    { id: 'CARD', label: 'Tokenized Card', icon: CreditCard },
-                    { id: 'NETBANKING', label: 'NetBanking', icon: Lock }
-                  ].map((mode) => {
-                    const Icon = mode.icon;
-                    return (
-                      <button
-                        key={mode.id}
-                        type="button"
-                        onClick={() => setPaymentMode(mode.id as any)}
-                        className={`p-3 rounded-xl border text-center text-xs font-medium transition-all flex flex-col items-center gap-1.5 ${
-                          paymentMode === mode.id
-                            ? 'border-campus-600 bg-campus-50/70 text-campus-800 font-semibold shadow-xs'
-                            : 'border-slate-200 hover:border-slate-300 text-slate-600'
-                        }`}
-                      >
-                        <Icon className="w-4 h-4 text-campus-600" />
-                        <span>{mode.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
+              <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-xs text-blue-900">
+                <div className="font-bold">Choose a payment method in the secure checkout</div>
+                <p className="mt-1 text-blue-800">UPI, card, and net-banking options are provided by the configured payment gateway. No card or UPI details are entered into this campus portal.</p>
               </div>
-
-              {/* Mode Detail Input */}
-              {paymentMode === 'UPI' && (
-                <div className="space-y-1.5 text-xs">
-                  <label className="text-slate-600 font-medium">Virtual Payment Address (VPA / UPI ID)</label>
-                  <input
-                    type="text"
-                    value={upiId}
-                    onChange={(e) => setUpiId(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-campus-500 font-mono"
-                  />
-                  <span className="text-[10px] text-emerald-600 flex items-center gap-1">
-                    <ShieldCheck className="w-3 h-3" /> Auto-simulates UPI notification approval
-                  </span>
-                </div>
-              )}
-
-              {paymentMode === 'CARD' && (
-                <div className="space-y-1.5 text-xs">
-                  <label className="text-slate-600 font-medium">PCI-DSS Tokenized Mock Card</label>
-                  <input
-                    type="text"
-                    value={cardNumber}
-                    readOnly
-                    className="w-full bg-slate-100 border border-slate-200 rounded-xl px-3 py-2 text-slate-600 font-mono"
-                  />
-                  <span className="text-[10px] text-slate-400">
-                    Module 6 Security: Zero raw card details or CVVs are stored on campus servers.
-                  </span>
-                </div>
-              )}
-
-              {paymentMode === 'NETBANKING' && (
-                <div className="space-y-1.5 text-xs">
-                  <label className="text-slate-600 font-medium">Select Institution Bank</label>
-                  <select className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800">
-                    <option>HDFC Bank Corporate Portal</option>
-                    <option>State Bank of India (Campus Branch)</option>
-                    <option>ICICI Bank e-Payments</option>
-                  </select>
-                </div>
-              )}
 
               {/* Pay Button */}
               <button
@@ -205,12 +188,12 @@ export const RazorpayModal: React.FC<RazorpayModalProps> = ({ isOpen, onClose, f
                 {processing ? (
                   <>
                     <div className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
-                    <span>Communicating with Razorpay Test Gateway...</span>
+                    <span>Preparing secure checkout...</span>
                   </>
                 ) : (
                   <>
                     <Lock className="w-4 h-4" />
-                    <span>Pay ₹{feeDue.balance_amount.toLocaleString()} Securely</span>
+                    <span>{checkoutMode === 'LOCAL_MOCK' ? 'Simulate payment of ' : 'Continue to pay '}₹{feeDue.balance_amount.toLocaleString()}</span>
                   </>
                 )}
               </button>
@@ -222,13 +205,13 @@ export const RazorpayModal: React.FC<RazorpayModalProps> = ({ isOpen, onClose, f
                 <CheckCircle2 className="w-10 h-10" />
               </div>
               <div>
-                <h3 className="font-extrabold text-slate-900 text-lg">Payment Verified</h3>
-                <p className="text-xs text-slate-500">Transaction completed via Razorpay Test Mode</p>
+                <h3 className="font-extrabold text-slate-900 text-lg">{completedReceipt.paymentMode === 'MOCK' ? 'Simulation Recorded' : 'Payment Captured'}</h3>
+                <p className="text-xs text-slate-500">Transaction completed via {completedReceipt.paymentMode === 'MOCK' ? 'local development simulation' : 'Razorpay'}</p>
               </div>
 
               <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-left text-xs space-y-2">
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Official Receipt #:</span>
+                  <span className="text-slate-500">Receipt #:</span>
                   <span className="font-mono font-bold text-slate-900">{completedReceipt.receiptNumber}</span>
                 </div>
                 <div className="flex justify-between">

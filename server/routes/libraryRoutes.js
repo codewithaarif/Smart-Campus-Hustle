@@ -40,18 +40,61 @@ export function handleLibraryRoutes(req, res, pathname, body) {
       res.end(JSON.stringify({ error: 'UNAUTHORIZED' }));
       return true;
     }
+    const bookId = typeof body.bookId === 'string' ? body.bookId : '';
+    if (!bookId) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'INVALID_BOOK_ID' }));
+      return true;
+    }
 
-    const { bookId } = body;
-    const resId = 'res_' + crypto.randomUUID().slice(0, 8);
-    const existingWaiting = db.prepare('SELECT count(*) as count FROM book_reservations WHERE book_id = ? AND status = "WAITING"').get(bookId).count;
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const book = db.prepare('SELECT id, title FROM library_books WHERE id = ? AND tenant_id = ?')
+        .get(bookId, tenantId);
+      if (!book) {
+        db.exec('ROLLBACK');
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'BOOK_NOT_FOUND' }));
+        return true;
+      }
+      const existing = db.prepare(`
+        SELECT id, queue_number, status FROM book_reservations
+        WHERE book_id = ? AND tenant_id = ? AND user_id = ?
+          AND status IN ('WAITING', 'ALLOTTED')
+      `).get(bookId, tenantId, req.user.id);
+      if (existing) {
+        db.exec('COMMIT');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: true,
+          alreadyReserved: true,
+          reservationId: existing.id,
+          queueNumber: existing.queue_number,
+          status: existing.status
+        }));
+        return true;
+      }
 
-    db.prepare(`
-      INSERT INTO book_reservations (id, tenant_id, book_id, user_id, status, queue_number)
-      VALUES (?, ?, ?, ?, 'WAITING', ?)
-    `).run(resId, tenantId, bookId, req.user.id, existingWaiting + 1);
+      const queueNumber = db.prepare(`
+        SELECT COALESCE(MAX(queue_number), 0) + 1 AS next_queue
+        FROM book_reservations
+        WHERE book_id = ? AND tenant_id = ? AND status = 'WAITING'
+      `).get(bookId, tenantId).next_queue;
+      const reservationId = 'res_' + crypto.randomUUID().replaceAll('-', '').slice(0, 14);
+      db.prepare(`
+        INSERT INTO book_reservations (id, tenant_id, book_id, user_id, status, queue_number)
+        VALUES (?, ?, ?, ?, 'WAITING', ?)
+      `).run(reservationId, tenantId, bookId, req.user.id, queueNumber);
+      db.exec('COMMIT');
 
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ success: true, reservationId: resId, queueNumber: existingWaiting + 1 }));
+      res.writeHead(201, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, reservationId, queueNumber, status: 'WAITING' }));
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch {}
+      console.error('Library reservation failed:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'RESERVATION_FAILED' }));
+    }
     return true;
   }
 
@@ -75,7 +118,7 @@ export function handleLibraryRoutes(req, res, pathname, body) {
     res.end(JSON.stringify({
       verified: true,
       allocatedSeat,
-      message: `Library gate turnstile unlocked. Welcome ${req.user.name}. Allocated Study Seat: ${allocatedSeat}.`
+      message: `Library entry recorded for ${req.user.name}. Suggested study area: ${allocatedSeat}. Physical turnstile hardware is not connected.`
     }));
     return true;
   }
